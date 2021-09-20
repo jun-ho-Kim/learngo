@@ -20,10 +20,8 @@ type extractedJob struct {
 	summary  string
 }
 
-var baseURL string = "https://kr.indeed.com/jobs?q=python&limit=10"
-
 func Scrape(term string) {
-	var baseURL string = "https://kr.indeed.com/jobs?q=" + term + "&limit=50"
+	var baseURL string = "https://kr.indeed.com/jobs?q=" + term + "&limit=10"
 	var jobs []extractedJob
 	c := make(chan []extractedJob)
 	csvC := make(chan bool)
@@ -37,7 +35,7 @@ func Scrape(term string) {
 		extractedJobs := <-c
 		jobs = append(jobs, extractedJobs...)
 	}
-	go writeJobs(jobs, csvC)
+	writeJobs(jobs, csvC)
 	fmt.Println("Done, extracted", len(jobs))
 }
 
@@ -58,12 +56,14 @@ func writeJobs(jobs []extractedJob, csvC chan<- bool) {
 	file.Write(utf8bom)
 
 	for _, job := range jobs {
-		jobSlice := []string{"https://kr.indeed.com/viewjob?jk=" + job.id, job.title, job.location, job.salary, job.summary}
-		jwErr := w.Write(jobSlice)
-		checkErr(jwErr)
+		go func(job extractedJob) {
+			jobSlice := []string{"https://kr.indeed.com/viewjob?jk=" + job.id, job.title, job.location, job.salary, job.summary}
+			jwErr := w.Write(jobSlice)
+			checkErr(jwErr)
+			csvC <- true
+		}(job)
 	}
 
-	csvC <- true
 }
 
 func getPage(page int, url string, mainC chan<- []extractedJob) {
