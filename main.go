@@ -24,17 +24,23 @@ var baseURL string = "https://kr.indeed.com/jobs?q=python&limit=10"
 
 func main() {
 	var jobs []extractedJob
+	c := make(chan []extractedJob)
+	csvC := make(chan bool)
 	totalPages := getPages()
 
 	for i := 0; i < totalPages; i++ {
-		extractedJobs := getPage(i)
+		go getPage(i, c)
+	}
+
+	for i := 0; i < totalPages; i++ {
+		extractedJobs := <-c
 		jobs = append(jobs, extractedJobs...)
 	}
-	writeJobs(jobs)
+	go writeJobs(jobs, csvC)
 	fmt.Println("Done, extracted", len(jobs))
 }
 
-func writeJobs(jobs []extractedJob) {
+func writeJobs(jobs []extractedJob, csvC chan<- bool) {
 	file, err := os.Create("jobs.csv")
 	checkErr(err)
 
@@ -55,10 +61,14 @@ func writeJobs(jobs []extractedJob) {
 		jwErr := w.Write(jobSlice)
 		checkErr(jwErr)
 	}
+
+	csvC <- true
 }
 
-func getPage(page int) []extractedJob {
+func getPage(page int, mainC chan<- []extractedJob) {
 	var jobs []extractedJob
+
+	c := make(chan extractedJob)
 
 	pageURL := baseURL + "$start=" + strconv.Itoa(page*50)
 	fmt.Println(pageURL)
@@ -75,10 +85,15 @@ func getPage(page int) []extractedJob {
 	searchCards := doc.Find(".tapItem")
 
 	searchCards.Each(func(i int, card *goquery.Selection) {
-		job := extractJob(card)
-		jobs = append(jobs, job)
+		go extractJob(card, c)
 	})
-	return jobs
+
+	for i := 0; i < searchCards.Length(); i++ {
+		job := <-c
+		jobs = append(jobs, job)
+	}
+
+	mainC <- jobs
 }
 
 func getPages() int {
@@ -99,13 +114,13 @@ func getPages() int {
 	return pages
 }
 
-func extractJob(card *goquery.Selection) extractedJob {
+func extractJob(card *goquery.Selection, c chan<- extractedJob) {
 	id, _ := card.Attr("data-jk")
 	title := cleanString(card.Find(".jobTitle>span").Text())
 	location := cleanString(card.Find(".companyLocation").Text())
 	salary := cleanString(card.Find(".salary-snippet").Text())
 	summary := cleanString(card.Find(".job-snippet").Text())
-	return extractedJob{
+	c <- extractedJob{
 		id:       id,
 		title:    title,
 		location: location,
